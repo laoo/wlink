@@ -209,6 +209,12 @@ impl RiscvChip {
         )
     }
 
+    /// Support observed MCU Memory Assign commands (0x0d/0x17, 0x0d/0x18)
+    /// based on verified CH32V30X captures.
+    pub(crate) fn support_mcu_memory_assign_cmds(&self) -> bool {
+        matches!(self, RiscvChip::CH32V30X)
+    }
+
     /// Support config registers, query info(UID, etc.)
     pub fn support_query_info(&self) -> bool {
         !matches!(

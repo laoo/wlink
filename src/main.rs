@@ -156,6 +156,14 @@ enum Commands {
     /// SDI virtual serial port,
     #[command(subcommand)]
     SdiPrint(SdiPrint),
+    #[command(
+        after_help = "Quick mode map:\n  192-128 => 0x01 (also 0x00)\n  224-96  => 0x03 (also 0x02)\n  256-64  => 0x05 (also 0x04)\n  128-192 => 0x06\n  288-32  => 0x07\n\nFor full details run: wlink help memory-assign set"
+    )]
+    /// Read or set MCU Memory Assign (SRAM_CODE_MODE)
+    MemoryAssign {
+        #[command(subcommand)]
+        cmd: MemoryAssign,
+    },
     Dev {},
 }
 
@@ -171,6 +179,61 @@ impl SdiPrint {
     pub fn is_enable(&self) -> bool {
         *self == SdiPrint::Enable
     }
+}
+
+#[derive(clap::Subcommand, PartialEq, Clone, Copy, Debug)]
+pub enum MemoryAssign {
+    /// Read current SRAM_CODE_MODE
+    Get,
+    /// Set SRAM_CODE_MODE using hex value or compact profile alias
+    Set {
+        ///
+        /// Accepted values:
+        /// - 192-128 => 0x01 (also accepts 0x00)
+        /// - 224-96  => 0x03 (also accepts 0x02)
+        /// - 256-64  => 0x05 (also accepts 0x04)
+        /// - 128-192 => 0x06
+        /// - 288-32  => 0x07
+        ///
+        /// Also accepted aliases:
+        /// - 192, 224, 256, 128, 288
+        /// - p0, p1, p2, p3, p4
+        #[arg(
+            value_parser = parse_memory_assign_mode,
+            value_name = "MODE",
+            long_help = "SRAM_CODE_MODE value.\n\nAccepted formats:\n  - Hex/raw: 0x00..0x07\n  - Profile aliases: 192-128, 224-96, 256-64, 128-192, 288-32\n  - Compact aliases: 192, 224, 256, 128, 288, p0..p4\n\nProfile to hex mapping:\n  - 192-128 => 0x01 (also 0x00)\n  - 224-96  => 0x03 (also 0x02)\n  - 256-64  => 0x05 (also 0x04)\n  - 128-192 => 0x06\n  - 288-32  => 0x07"
+        )]
+        mode: u8,
+        /// Skip read-back verify after write
+        #[arg(long, default_value = "false")]
+        no_verify: bool,
+    },
+}
+
+fn decode_mcu_memory_assign_mode(mode: u8) -> &'static str {
+    match mode & 0x07 {
+        0b000 | 0b001 => "CODE-192KB + RAM-128KB",
+        0b010 | 0b011 => "CODE-224KB + RAM-96KB",
+        0b100 | 0b101 => "CODE-256KB + RAM-64KB",
+        0b110 => "CODE-128KB + RAM-192KB",
+        0b111 => "CODE-288KB + RAM-32KB",
+        _ => "UNKNOWN",
+    }
+}
+
+fn mcu_memory_assign_profile_id(mode: u8) -> u8 {
+    match mode & 0x07 {
+        0b000 | 0b001 => 0,
+        0b010 | 0b011 => 1,
+        0b100 | 0b101 => 2,
+        0b110 => 3,
+        0b111 => 4,
+        _ => 0xff,
+    }
+}
+
+fn is_same_mcu_memory_assign_profile(expected: u8, observed: u8) -> bool {
+    mcu_memory_assign_profile_id(expected) == mcu_memory_assign_profile_id(observed)
 }
 
 fn main() -> Result<()> {
@@ -427,6 +490,39 @@ fn main() -> Result<()> {
                         sess.set_sdi_print_enabled(false)?;
                     }
                 },
+                Commands::MemoryAssign { cmd } => match cmd {
+                    MemoryAssign::Get => {
+                        let mode = sess.get_mcu_memory_assign()?;
+                        let profile = decode_mcu_memory_assign_mode(mode);
+                        log::info!(
+                            "MCU Memory Assign: 0x{:02x} ({})",
+                            mode,
+                            profile
+                        );
+                        println!("0x{mode:02x} ({profile})");
+                    }
+                    MemoryAssign::Set { mode, no_verify } => {
+                        let profile = decode_mcu_memory_assign_mode(mode);
+                        log::info!("Set MCU Memory Assign to 0x{:02x} ({})", mode, profile);
+                        sess.set_mcu_memory_assign(mode)?;
+
+                        if !no_verify {
+                            let read_back = sess.get_mcu_memory_assign()?;
+                            let read_profile = decode_mcu_memory_assign_mode(read_back);
+                            if !is_same_mcu_memory_assign_profile(mode, read_back) {
+                                return Err(wlink::Error::Custom(format!(
+                                    "MCU Memory Assign verify failed: wrote 0x{mode:02x} ({profile}), read back 0x{read_back:02x} ({read_profile})"
+                                ))
+                                .into());
+                            }
+                            log::info!(
+                                "MCU Memory Assign verified: 0x{:02x} ({})",
+                                read_back,
+                                read_profile
+                            );
+                        }
+                    }
+                },
                 _ => unreachable!("unimplemented command"),
             }
             if will_detach {
@@ -450,4 +546,30 @@ pub fn parse_number(s: &str) -> std::result::Result<u32, String> {
     } else {
         Ok(s.parse().expect("must be a number"))
     }
+}
+
+pub fn parse_memory_assign_mode(s: &str) -> std::result::Result<u8, String> {
+    let norm = s.trim().to_lowercase().replace('_', "-");
+
+    let canonical = match norm.as_str() {
+        // profile aliases (CODE-RAM)
+        "192-128" | "192/128" | "192:128" | "192" | "p0" => Some(0x01),
+        "224-96" | "224/96" | "224:96" | "224" | "p1" => Some(0x03),
+        "256-64" | "256/64" | "256:64" | "256" | "p2" => Some(0x05),
+        "128-192" | "128/192" | "128:192" | "128" | "p3" => Some(0x06),
+        "288-32" | "288/32" | "288:32" | "288" | "p4" => Some(0x07),
+        _ => None,
+    };
+
+    if let Some(mode) = canonical {
+        return Ok(mode);
+    }
+
+    let raw = parse_number(s)?;
+    let raw = u8::try_from(raw).map_err(|_| "mode must be in range 0x00..0x07".to_string())?;
+    if raw > 0x07 {
+        return Err("mode must be in range 0x00..0x07".to_string());
+    }
+
+    Ok(raw)
 }

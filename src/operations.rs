@@ -16,6 +16,17 @@ pub struct ProbeSession {
     pub speed: Speed,
 }
 
+fn decode_sram_code_mode_v2_v3(mode: u8) -> &'static str {
+    match mode & 0x07 {
+        0b000 | 0b001 => "CODE-192KB + RAM-128KB",
+        0b010 | 0b011 => "CODE-224KB + RAM-96KB",
+        0b100 | 0b101 => "CODE-256KB + RAM-64KB",
+        0b110 => "CODE-128KB + RAM-192KB",
+        0b111 => "CODE-288KB + RAM-32KB",
+        _ => "UNKNOWN",
+    }
+}
+
 impl ProbeSession {
     /// Attach probe to target chip, start a probe session
     pub fn attach(probe: WchLink, expected_chip: Option<RiscvChip>, speed: Speed) -> Result<Self> {
@@ -119,16 +130,63 @@ impl ProbeSession {
             }
         }
         if self.chip_family.support_ram_rom_mode() {
-            let sram_code_mode = self
-                .probe
-                .send_command(commands::control::GetChipRomRamSplit)?;
-            log::debug!("SRAM CODE split mode: {}", sram_code_mode);
+            let sram_code_mode = self.get_mcu_memory_assign()?;
+            log::debug!(
+                "SRAM CODE split mode: {} (0x{:02x}, {})",
+                sram_code_mode,
+                sram_code_mode,
+                decode_sram_code_mode_v2_v3(sram_code_mode)
+            );
         }
         /*
         if detailed {
 
         }
         */
+        Ok(())
+    }
+
+    /// Read MCU memory assignment mode.
+    ///
+    /// For CH32V30X, this uses observed official-tool command `0x0d/0x17`.
+    /// For other chips that support RAM/ROM mode, it falls back to legacy `0x0d/0x04`.
+    pub fn get_mcu_memory_assign(&mut self) -> Result<u8> {
+        if self.chip_family.support_mcu_memory_assign_cmds() {
+            match self.probe.send_command(commands::control::GetMcuMemoryAssign) {
+                Ok(mode) => return Ok(mode),
+                Err(err) => {
+                    log::debug!(
+                        "GetMcuMemoryAssign (0x0d/0x17) failed: {err:?}; trying legacy 0x0d/0x04"
+                    );
+                }
+            }
+        }
+
+        self.probe
+            .send_command(commands::control::GetChipRomRamSplit)
+    }
+
+    /// Set MCU memory assignment mode via observed command `0x0d/0x18`.
+    ///
+    /// Safety gate: currently enabled only for CH32V30X.
+    pub fn set_mcu_memory_assign(&mut self, mode: u8) -> Result<()> {
+        if !self.chip_family.support_mcu_memory_assign_cmds() {
+            return Err(Error::Custom(format!(
+                "MCU Memory Assign set (0x0d/0x18) is enabled only for CH32V30X, attached: {:?}",
+                self.chip_family
+            )));
+        }
+
+        let ack = self
+            .probe
+            .send_command(commands::control::SetMcuMemoryAssign(mode))?;
+
+        if ack != 0x18 {
+            return Err(Error::Custom(format!(
+                "Unexpected MCU Memory Assign ACK: 0x{ack:02x}"
+            )));
+        }
+
         Ok(())
     }
 
