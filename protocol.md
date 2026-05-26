@@ -110,10 +110,10 @@ oOp_u8 = 0x02 when failed
 - 0x02 Connect chip
 - 0x03 ? stage after connect chip and read riscvchip, for riscvchip 1
 - 0x04 get rom ram split, for riscvchip 3, 5, 6, 9
-- 0x17 Get MCU Memory Assign (SRAM_CODE_MODE)
+- 0x17 Get MCU Memory Split (SRAM_CODE_MODE)
   - Request: `81 0d 01 17`
   - Response payload: one byte mode value
-- 0x18 Set MCU Memory Assign (SRAM_CODE_MODE)
+- 0x18 Set MCU Memory Split (SRAM_CODE_MODE)
   - Request: `81 0d 02 18 <mode>`
   - Response payload: `18` (ACK)
 - 0xff End process

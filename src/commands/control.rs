@@ -135,12 +135,12 @@ impl Command for GetChipRomRamSplit {
     }
 }
 
-/// Get MCU Memory Assign (SRAM_CODE_MODE)
+/// Get MCU Memory Split (SRAM_CODE_MODE)
 /// Observed in official tool as command sequence: 81 0d 01 17
 /// Response payload is one byte mode value (USER[7:5]-related).
 #[derive(Debug)]
-pub struct GetMcuMemoryAssign;
-impl Command for GetMcuMemoryAssign {
+pub struct GetMcuMemorySplit;
+impl Command for GetMcuMemorySplit {
     type Response = u8;
     const COMMAND_ID: u8 = 0x0d;
     fn payload(&self) -> Vec<u8> {
@@ -150,7 +150,7 @@ impl Command for GetMcuMemoryAssign {
 
 /// 0, 1, 2, 3
 #[derive(Debug)]
-pub struct SetChipRomRamSplit(u8);
+pub struct SetChipRomRamSplit(pub u8);
 impl Command for SetChipRomRamSplit {
     type Response = ();
     const COMMAND_ID: u8 = 0x0d;
@@ -159,12 +159,12 @@ impl Command for SetChipRomRamSplit {
     }
 }
 
-/// Set MCU Memory Assign (SRAM_CODE_MODE)
+/// Set MCU Memory Split (SRAM_CODE_MODE)
 /// Observed in official tool as command sequence: 81 0d 02 18 <mode>
 /// Response payload is one byte: 0x18 (subcommand echo/ack).
 #[derive(Debug)]
-pub struct SetMcuMemoryAssign(pub u8);
-impl Command for SetMcuMemoryAssign {
+pub struct SetMcuMemorySplit(pub u8);
+impl Command for SetMcuMemorySplit {
     type Response = u8;
     const COMMAND_ID: u8 = 0x0d;
     fn payload(&self) -> Vec<u8> {
