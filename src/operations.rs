@@ -199,6 +199,11 @@ impl ProbeSession {
                     );
                 }
             }
+        } else if !self.chip_family.support_ram_rom_mode() {
+            return Err(Error::Custom(format!(
+                "MCU Memory Split is not supported for {:?}",
+                self.chip_family
+            )));
         }
 
         self.probe
